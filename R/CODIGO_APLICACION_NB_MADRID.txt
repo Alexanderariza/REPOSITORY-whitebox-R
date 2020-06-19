@@ -1,0 +1,54 @@
+##  Cargar paquetes necesarios
+library(raster)
+library(sp)
+library(rgdal)
+library(caret)
+library(snow)
+### Importar elementos necesarios ###
+
+B1 <- brick("C:/Users/INMACULADA/Google Drive/TESIS/ALEX/R/MADRID/rbr_madrid.tif")##  Importar raster a clasificar
+plot(B1,col=grey.colors(256)) ##  Visualización de raster importado
+
+trainData <- shapefile("C:/Users/INMACULADA/Google Drive/TESIS/ALEX/R/MADRID/A_ENTRENAMIENTO_MADRID_puntos.shp") ##  Importar áreas de entranamiento
+responseCol <- "CLASE" ##  Selección de atributo donde se encuentra la discriminación de clases en el shape
+
+### Extracción de valores de los pixeles para la calibración del modelo ###
+
+dfAll = data.frame(matrix(vector(), nrow = 0, ncol = length(names(B1)))+1) ## Creación de un data frame donde serán almacenados la extracción de los valores de los pixeles  
+for (i in 1:length(unique(trainData[[responseCol]]))){ ## Ciclo para la extracción de los valores de los pixeles 
+  category <- unique(trainData[[responseCol]])[i]
+  categorymap <- trainData[trainData[[responseCol]] == category,]
+  dataSet <- extract(B1, categorymap)
+  
+  if(is(trainData, "SpatialPointsDataFrame")){
+    dataSet <- cbind(dataSet, CLASE = as.numeric(category))
+    dfAll <- rbind(dfAll, dataSet)
+  }
+  if(is(trainData, "SpatialPolygonsDataFrame")){
+    dataSet <- lapply(dataSet, function(x){cbind(x, CLASE = as.numeric(rep(category, nrow(x))))})
+    df <- do.call("rbind", dataSet)
+    dfAll <- rbind(dfAll, df)
+  }
+}
+
+dfAll ## Visualización de los valores extraidos
+
+
+### Aplicación del modelo de clasificador Naive Bayes  ###
+
+
+model_nb <-train(as.factor(CLASE) ~ ., method = "nb", data = dfAll)
+
+model_nb ## Visualización intera del modelo
+
+### Clasificación del raster B1  ###
+
+beginCluster() ## Procesamiento más eficiente en paralelo, utilizando todos los núcleos 
+preds_nb <- clusterR(B1, raster::predict, args = list(model = model_nb)) ## Clasificicación del raster con las predicciones calculadas anteriormente
+endCluster() ##Fin procesamiento en paralelo
+
+plot(preds_nb)## Visualización de la clasificación en R.
+col=c("chartreuse","chartreuse","yellow","orangered","red")
+plot(B1,col=col)
+
+writeRaster(preds_nb,"C:/Users/INMACULADA/Google Drive/TESIS/ALEX/R/MADRID/clasficacion_madrid_nb_alex.img") ## Guardar raster clasificado en formato deseado
